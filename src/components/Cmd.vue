@@ -19,6 +19,7 @@
 					ref="inputField"
 					v-model="value"
 					@keydown.enter.prevent="handleCommand"
+					@keydown="handleKeydown"
 					rows="1"
 					spellcheck="false"
 					autocomplete="off"
@@ -36,6 +37,7 @@ const base = ref('root@ata.parvin');
 const path = ref('~');
 const value = ref('');
 const history = ref([]);
+const tabIndex = ref(-1);
 const inputField = ref(null);
 const cursorOffset = ref(0);
 
@@ -57,29 +59,88 @@ watch(
 );
 
 // Directory Data
-const directories = [
-	{
-		name: 'about',
+const directories = {
+	about: {
 		content:
 			'Name: Ata Parvin\nRole: Full Stack Developer\nStatus: Looking for root access...',
+		subdirs: {},
+		files: {},
 	},
-	{
-		name: 'experience',
+	experience: {
+		content: '',
+		subdirs: {
+			'Critical Mass': {
+				content:
+					'Current company: Critical Mass\nRole: Full Stack Developer\nJoined: 2023',
+				subdirs: {
+					project1: {
+						content:
+							'E-commerce Platform\nTech: Vue.js, Node.js\nDescription: Built a scalable e-commerce site.',
+						subdirs: {},
+						files: {},
+					},
+					project2: {
+						content:
+							'Dashboard App\nTech: React, Express\nDescription: Real-time analytics dashboard.',
+						subdirs: {},
+						files: {},
+					},
+				},
+				files: {
+					'responsibilities.txt':
+						'- Developed full-stack web applications\n- Integrated APIs and databases\n- Collaborated with design and product teams\n- Optimized performance and user experience',
+				},
+			},
+			'Previous Company': {
+				content:
+					'Previous company: XYZ Corp\nRole: Junior Developer\nDuration: 2020-2023',
+				subdirs: {},
+				files: {
+					'achievements.txt':
+						'- Built initial prototypes\n- Learned modern web technologies',
+				},
+			},
+		},
+		files: {},
+	},
+	contact: {
 		content:
-			'1. Frontend Dev - Vue.js\n2. Backend Architect - Node.js\n3. Linux Enthusiast',
+			'Email: hello@ata.parvin\nGitHub: github.com/atapavin\nLinkedIn: linkedin.com/in/atapavin',
+		subdirs: {},
+		files: {},
 	},
-	{
-		name: 'contact',
-		content: 'Email: hello@ata.parvin\nGitHub: github.com/atapavin',
-	},
-];
+};
+
+// Helper function to get current directory object
+const getCurrentDir = () => {
+	let current = { subdirs: directories, files: {} };
+	if (path.value === '~') return current;
+	const parts = path.value.replace('~/', '').split('/');
+	for (const part of parts) {
+		if (current.subdirs && current.subdirs[part]) {
+			current = current.subdirs[part];
+		} else {
+			return null;
+		}
+	}
+	return current;
+};
 
 const handleCommand = () => {
 	const currentCommand = value.value;
 	const trimmed = currentCommand.trim();
 	const args = trimmed.split(' ');
 	const cmd = args[0].toLowerCase();
-	const target = args[1];
+	let target = '';
+
+	// Parse target based on command
+	if (cmd === 'cd' && trimmed.length > 3) {
+		target = trimmed.slice(3).trim();
+	} else if (cmd === 'cat' && trimmed.length > 4) {
+		target = trimmed.slice(4).trim();
+	} else {
+		target = args[1] || '';
+	}
 
 	let output = '';
 
@@ -88,41 +149,45 @@ const handleCommand = () => {
 
 	// COMMAND LOGIC
 	if (cmd === 'ls') {
-		if (path.value === '~') {
-			output = directories.map((d) => d.name).join('    ');
+		const currentDir = getCurrentDir();
+		if (currentDir) {
+			const subdirNames = Object.keys(currentDir.subdirs);
+			const fileNames = Object.keys(currentDir.files);
+			output = [...subdirNames, ...fileNames].join('    ');
 		} else {
-			const currentDirName = path.value.replace('~/', '');
-			if (currentDirName) {
-				output = currentDirName;
-			} else {
-				output = '';
-			}
+			output = 'ls: No such directory';
 		}
 	} else if (cmd === 'cd') {
 		if (!target || target === '~' || target === '/') {
 			path.value = '~';
 		} else if (target === '..') {
-			path.value = '~';
+			if (path.value === '~') {
+				// stay
+			} else {
+				const parts = path.value.split('/');
+				parts.pop();
+				path.value = parts.length > 1 ? parts.join('/') : '~';
+			}
 		} else {
-			const exists = directories.find((d) => d.name === target);
-			if (exists) {
-				path.value = `~/${target}`;
+			const currentDir = getCurrentDir();
+			if (currentDir && currentDir.subdirs[target]) {
+				path.value =
+					path.value === '~' ? `~/${target}` : `${path.value}/${target}`;
 			} else {
 				output = `bash: cd: ${target}: No such directory`;
 			}
 		}
 	} else if (cmd === 'cat') {
-		const currentDirName = path.value.replace('~/', '');
-		if (!currentDirName) {
-			output = 'cat: No file in current directory.';
+		const currentDir = getCurrentDir();
+		if (!target) {
+			if (currentDir && currentDir.content) {
+				output = currentDir.content;
+			} else {
+				output = 'cat: No content in current directory.';
+			}
 		} else {
-			if (!target || target === currentDirName) {
-				const dir = directories.find((d) => d.name === currentDirName);
-				if (dir) {
-					output = dir.content;
-				} else {
-					output = 'cat: File not found.';
-				}
+			if (currentDir && currentDir.files[target]) {
+				output = currentDir.files[target];
 			} else {
 				output = `cat: ${target}: No such file`;
 			}
@@ -151,6 +216,72 @@ const handleCommand = () => {
 
 	value.value = '';
 	scrollToBottom();
+};
+
+// Tab completion
+const handleKeydown = (e) => {
+	if (e.key === 'Tab') {
+		e.preventDefault();
+		handleTab();
+	} else if (e.key !== 'Enter') {
+		tabIndex.value = -1;
+	}
+};
+
+const handleTab = () => {
+	const trimmed = value.value.trim();
+	if (trimmed === 'cd ') {
+		const currentDir = getCurrentDir();
+		if (currentDir) {
+			const options = Object.keys(currentDir.subdirs);
+			if (options.length > 0) {
+				value.value = 'cd ' + options[0];
+				tabIndex.value = 0;
+			}
+		}
+	} else {
+		const spaceIndex = trimmed.indexOf(' ');
+		if (spaceIndex > 0) {
+			const cmd = trimmed.slice(0, spaceIndex);
+			const prefix = trimmed.slice(spaceIndex + 1).trim();
+			const currentDir = getCurrentDir();
+			if (cmd === 'cd' && currentDir) {
+				const options = Object.keys(currentDir.subdirs);
+				const matches = options.filter((opt) => opt.startsWith(prefix));
+				if (matches.length > 0) {
+					if (tabIndex.value === -1) {
+						tabIndex.value = 0;
+					} else {
+						tabIndex.value = (tabIndex.value + 1) % matches.length;
+					}
+					value.value = 'cd ' + matches[tabIndex.value];
+				}
+			} else if (cmd === 'cat' && currentDir) {
+				const options = Object.keys(currentDir.files);
+				const matches = options.filter((opt) => opt.startsWith(prefix));
+				if (matches.length > 0) {
+					if (tabIndex.value === -1) {
+						tabIndex.value = 0;
+					} else {
+						tabIndex.value = (tabIndex.value + 1) % matches.length;
+					}
+					value.value = 'cat ' + matches[tabIndex.value];
+				}
+			}
+		} else {
+			// Complete command names
+			const commands = ['ls', 'cd', 'cat', 'pwd', 'echo', 'clear', 'help'];
+			const matches = commands.filter((c) => c.startsWith(trimmed));
+			if (matches.length > 0) {
+				if (tabIndex.value === -1) {
+					tabIndex.value = 0;
+				} else {
+					tabIndex.value = (tabIndex.value + 1) % matches.length;
+				}
+				value.value = matches[tabIndex.value];
+			}
+		}
+	}
 };
 
 // Layout & Cursor Logic
