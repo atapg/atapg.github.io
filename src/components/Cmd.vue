@@ -2,8 +2,10 @@
 	<div class="container" @click="focusTextArea">
 		<div class="history">
 			<div v-for="(entry, index) in history" :key="index" class="history-line">
-				<span class="prompt">{{ entry.prompt }}</span>
-				<span class="command-text">{{ entry.command }}</span>
+				<div class="command-row">
+					<span class="prompt">{{ entry.prompt }}</span>
+					<span class="command-text">{{ entry.command }}</span>
+				</div>
 				<div v-if="entry.output" class="output-text">{{ entry.output }}</div>
 			</div>
 		</div>
@@ -19,6 +21,7 @@
 					@keydown.enter.prevent="handleCommand"
 					rows="1"
 					spellcheck="false"
+					autocomplete="off"
 				/>
 				<span class="cursor" :style="{ left: cursorOffset + 'px' }"></span>
 			</div>
@@ -27,7 +30,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, computed, watch } from 'vue';
+import { ref, nextTick, onMounted, watch } from 'vue';
 
 const base = ref('root@ata.parvin');
 const path = ref('~');
@@ -36,24 +39,83 @@ const history = ref([]);
 const inputField = ref(null);
 const cursorOffset = ref(0);
 
+// Directory Data
+const directories = [
+	{
+		name: 'about',
+		content:
+			'Name: Ata Parvin\nRole: Full Stack Developer\nStatus: Looking for root access...',
+	},
+	{
+		name: 'experience',
+		content:
+			'1. Frontend Dev - Vue.js\n2. Backend Architect - Node.js\n3. Linux Enthusiast',
+	},
+	{
+		name: 'contact',
+		content: 'Email: hello@ata.parvin\nGitHub: github.com/atapavin',
+	},
+];
+
 const handleCommand = () => {
-	const currentCommand = value.value; // Keep original for history
+	const currentCommand = value.value;
+	const trimmed = currentCommand.trim();
+	const args = trimmed.split(' ');
+	const cmd = args[0].toLowerCase();
+	const target = args[1];
+
 	let output = '';
 
-	const cmd = currentCommand.trim().toLowerCase();
+	// Capture prompt before changing path
+	const currentPrompt = `${base.value}:${path.value}#`;
 
-	if (cmd === 'help') {
-		output = 'Available: bio, projects, clear';
+	// COMMAND LOGIC
+	if (cmd === 'ls') {
+		if (path.value === '~') {
+			output = directories.map((d) => d.name).join('    ');
+		} else {
+			const currentDirName = path.value.replace('~/', '');
+			const dir = directories.find((d) => d.name === currentDirName);
+			if (dir) {
+				output = dir.content;
+			} else {
+				output = '';
+			}
+		}
+	} else if (cmd === 'cd') {
+		if (!target || target === '~' || target === '/') {
+			path.value = '~';
+		} else if (target === '..') {
+			path.value = '~';
+		} else {
+			const exists = directories.find((d) => d.name === target);
+			if (exists) {
+				path.value = `~/${target}`;
+			} else {
+				output = `bash: cd: ${target}: No such directory`;
+			}
+		}
+	} else if (cmd === 'cat') {
+		const currentDirName = path.value.replace('~/', '');
+		const dir = directories.find((d) => d.name === currentDirName);
+		if (dir) {
+			output = dir.content;
+		} else {
+			output = 'cat: No content in current directory.';
+		}
+	} else if (cmd === 'help') {
+		output = 'Commands: ls, cd [dir], cat, clear, help';
 	} else if (cmd === 'clear') {
 		history.value = [];
 		value.value = '';
 		return;
-	} else if (cmd !== '') {
+	} else if (trimmed !== '') {
 		output = `bash: ${cmd}: command not found`;
 	}
 
+	// Record History
 	history.value.push({
-		prompt: `${base.value}:${path.value}#`,
+		prompt: currentPrompt,
 		command: currentCommand,
 		output: output,
 	});
@@ -62,7 +124,7 @@ const handleCommand = () => {
 	scrollToBottom();
 };
 
-// Calculate the width of the text to move the cursor
+// Layout & Cursor Logic
 const updateCursor = () => {
 	nextTick(() => {
 		const mirror = document.querySelector('.text-mirror');
@@ -72,18 +134,18 @@ const updateCursor = () => {
 	});
 };
 
-// Watch the input value to move the cursor in real-time
-watch(value, () => {
-	updateCursor();
-});
+watch(value, () => updateCursor());
 
 onMounted(() => {
 	focusTextArea();
 });
 
-const focusTextArea = () => inputField.value.focus();
+const focusTextArea = () => inputField.value?.focus();
+
 const scrollToBottom = () =>
-	nextTick(() => window.scrollTo(0, document.body.scrollHeight));
+	nextTick(() =>
+		window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+	);
 </script>
 
 <style lang="scss" scoped>
@@ -93,21 +155,27 @@ const scrollToBottom = () =>
 	color: white;
 	padding: 20px;
 	font-family: 'Courier New', monospace;
-	display: flex;
-	flex-direction: column;
-	white-space: pre; // Crucial to maintain spaces width
-	font-family: 'Courier New', monospace;
 	font-size: 18px;
 	font-weight: 500;
+	display: flex;
+	flex-direction: column;
+	cursor: text;
 
 	.history-line {
+		.command-row {
+			display: flex;
+			align-items: center;
+		}
+
 		.command-text {
 			margin-left: 2px;
+			white-space: pre;
 		}
+
 		.output-text {
 			color: #aaa;
 			white-space: pre-wrap;
-			margin-top: 2px;
+			line-height: 1.4;
 		}
 	}
 
@@ -129,14 +197,13 @@ const scrollToBottom = () =>
 		flex: 1;
 		align-items: center;
 
-		// The Mirror must have the exact same font properties as the textarea
 		.text-mirror {
 			visibility: hidden;
 			position: absolute;
-			white-space: pre; // Crucial to maintain spaces width
-			font-family: 'Courier New', monospace;
-			font-size: 18px;
-			font-weight: 500;
+			white-space: pre;
+			font-family: inherit;
+			font-size: inherit;
+			font-weight: inherit;
 		}
 
 		textarea {
@@ -146,9 +213,9 @@ const scrollToBottom = () =>
 			outline: none;
 			resize: none;
 			flex: 1;
-			font-family: 'Courier New', monospace;
-			font-size: 18px;
-			font-weight: 500;
+			font-family: inherit;
+			font-size: inherit;
+			font-weight: inherit;
 			padding: 0;
 			margin: 0;
 			caret-color: transparent;
